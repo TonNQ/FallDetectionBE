@@ -1,3 +1,4 @@
+/* eslint-disable indent */
 /* eslint-disable camelcase */
 /* eslint-disable max-len */
 const functions = require("firebase-functions");
@@ -7,7 +8,7 @@ const FCM = require("fcm-node");
 admin.initializeApp();
 
 const push_service = new FCM(
-    "AAAArJcFDBQ:APA91bEFN5vfUHvOw7jFyiTCq9F8XUgpmV-fMnyb3aTQ76jiZGW6F3XEtIWrK07RMmaNJPw3RAz3NlX904DIlajaM8PoJ5hKd5o-0aQSV50lnX7f_0ufJMKESH1GVwwk_HDwCUaMdLqh",
+  "AAAArJcFDBQ:APA91bEFN5vfUHvOw7jFyiTCq9F8XUgpmV-fMnyb3aTQ76jiZGW6F3XEtIWrK07RMmaNJPw3RAz3NlX904DIlajaM8PoJ5hKd5o-0aQSV50lnX7f_0ufJMKESH1GVwwk_HDwCUaMdLqh",
 );
 
 exports.handleFallDetection = functions.https.onRequest((req, res) => {
