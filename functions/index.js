@@ -1,29 +1,29 @@
-const { onRequest } = require("firebase-functions/v2/https")
-const admin = require("firebase-admin")
-const { getFirestore } = require("firebase-admin/firestore")
-const { setGlobalOptions } = require("firebase-functions/v2")
+const { onRequest } = require("firebase-functions/v2/https");
+const admin = require("firebase-admin");
+const { getFirestore } = require("firebase-admin/firestore");
+const { setGlobalOptions } = require("firebase-functions/v2");
 // const { log } = require("firebase-functions/logger")
 
-admin.initializeApp({ credential: admin.credential.applicationDefault() })
-setGlobalOptions({ maxInstances: 10 })
+admin.initializeApp({ credential: admin.credential.applicationDefault() });
+setGlobalOptions({ maxInstances: 10 });
 
 exports.handleFallDetection = onRequest(async (req, res) => {
   try {
-    const message = req.body
-    await getFirestore().collection("messages").add(message)
-    await sendFall(message)
+    const message = req.body;
+    await getFirestore().collection("messages").add(message);
+    await sendFall(message);
     res.json({
       success: true,
-      error: null
-    })
+      error: null,
+    });
   } catch (error) {
-    console.error("Error in handleFallDetection:", error)
+    console.error("Error in handleFallDetection:", error);
     res.json({
       success: false,
-      error: error.message
-    })
+      error: error.message,
+    });
   }
-})
+});
 
 /**
  * Send notification to user
@@ -31,101 +31,115 @@ exports.handleFallDetection = onRequest(async (req, res) => {
  */
 async function sendFall(body) {
   try {
-    const patient = await getFirestore().collection("user").where("deviceID", "==", body.data.deviceID).get()
-    const patientEmail = patient.docs[0].data().email
-    const patientName = patient.docs[0].data().fullName
-    
-    const userDeviceSnapshot = await admin.firestore().collection("user_device_collection").get();
+    const patient = await getFirestore()
+      .collection("user")
+      .where("deviceID", "==", body.data.deviceID)
+      .get();
+    const patientEmail = patient.docs[0].data().email;
+    const patientName = patient.docs[0].data().fullName;
+    await getFirestore()
+      .collection("fall-history")
+      .add({ patientEmail: patientEmail, time: body.data.time });
+    const userDeviceSnapshot = await getFirestore()
+      .collection("user-device")
+      .get();
     const userList = [];
-    userDeviceSnapshot.forEach(doc => {
-        const userData = doc.data();
-        if (userData.patientEmail === patientEmail) {
-            userList.push(userData.userEmail);
-        }
-    });
-
-    const userTokens = [];
-    
-    for (const userEmail of userList) {
-        const userSnapshot = await admin.firestore().collection("userCollection").where("userEmail", "==", userEmail).get();
-        
-        userSnapshot.forEach(doc => {
-            const userData = doc.data();
-            const tokens = userData.token || [];
-            tokens.forEach(token => {
-                if (token) {
-                    userTokens.push(token);
-                }
-            });
-        });
-    }
-    
-    userTokens.forEach(async token => {
-      const message = {
-      token: token,
-      data: {
-        patientEmail: patientEmail,
-        patientName: patientName,
+    userDeviceSnapshot.forEach((doc) => {
+      const userData = doc.data();
+      if (userData.patientEmail === patientEmail) {
+        userList.push(userData.userEmail);
       }
+    });
+    const userTokens = [];
+
+    for (const userEmail of userList) {
+      const userSnapshot = await getFirestore()
+        .collection("user")
+        .where("email", "==", userEmail)
+        .get();
+
+      userSnapshot.forEach((doc) => {
+        const userData = doc.data();
+        const tokens = userData.tokens || [];
+        tokens.forEach((token) => {
+          if (token) {
+            userTokens.push(token);
+          }
+        });
+      });
     }
-      await admin.messaging()
+
+    userTokens.forEach(async (token) => {
+      const message = {
+        token: token,
+        data: {
+          title: "Fall Detection",
+          patientEmail: patientEmail,
+          patientName: patientName,
+          time: body.data.time,
+        },
+      };
+      console.log("Sending message:", message);
+      await admin
+        .messaging()
         .send(message)
         .then((response) => {
-          console.log("success", response)
-        })
-      });
+          console.log("success", response);
+        });
+    });
   } catch (error) {
-    console.error("Error in sendFall:", error)
+    console.error("Error in sendFall:", error);
   }
 }
 
 exports.addObserverRequest = onRequest(async (req, res) => {
   try {
-    const requestObserver = req.body
+    const requestObserver = req.body;
 
     if (requestObserver.patientEmail == requestObserver.supervisorEmail) {
       res.json({
         success: false,
-        error: "Tài khoản người theo dõi và người được theo dõi không thể trùng nhau"
-      })
-      return
+        error:
+          "Tài khoản người theo dõi và người được theo dõi không thể trùng nhau",
+      });
+      return;
     }
 
-    const isPatient = await checkIfPatient(requestObserver.patientEmail)
+    const isPatient = await checkIfPatient(requestObserver.patientEmail);
     if (!isPatient) {
       res.json({
         success: false,
-        error: "Người bạn muốn theo dõi chưa đăng ký thiết bị"
-      })
-      return
+        error: "Người bạn muốn theo dõi chưa đăng ký thiết bị",
+      });
+      return;
     }
 
     // Chuyển time sang kiểu date
-    const time = new Date(requestObserver.time)
-    requestObserver.time = time
+    const time = new Date(requestObserver.time);
+    requestObserver.time = time;
     // Thêm vào firestore
     await getFirestore()
       .collection("observer-request")
       .doc(`${requestObserver.supervisorEmail}_${requestObserver.patientEmail}`)
-      .set(requestObserver)
+      .set(requestObserver);
     // Gửi tin nhắn đến các thiết bị đang đăng nhập vào tài khoản người bệnh
-    const tokens = await getAccountToken(requestObserver.patientEmail)
+    const tokens = await getAccountToken(requestObserver.patientEmail);
     if (tokens) {
-      await sendObserverRequest(tokens, requestObserver)
+      await sendObserverRequest(tokens, requestObserver);
     }
-    
+
     res.json({
       success: true,
-      error: null
-    })
+      error: null,
+    });
   } catch (error) {
-    console.error("Error in addObserverRequest:", error)
+    console.error("Error in addObserverRequest:", error);
     res.json({
       success: false,
-      error: error.message
-    })
+      error: error.message,
+    });
   }
-})
+});
 
 /**
  * Checks if the user with the given email is a patient.
@@ -134,20 +148,22 @@ exports.addObserverRequest = onRequest(async (req, res) => {
  */
 async function checkIfPatient(patientEmail) {
   try {
-    const document = await getFirestore().collection("user").doc(patientEmail).get();
+    const document = await getFirestore()
+      .collection("user")
+      .doc(patientEmail)
+      .get();
     if (!document.exists) {
       console.log("No document found for email:", patientEmail);
-      return false;  // No document found, user is not a patient
+      return false; // No document found, user is not a patient
     }
 
     const role = document.data().role;
-    return role === 1;  // Assuming role 1 corresponds to a patient
+    return role === 1; // Assuming role 1 corresponds to a patient
   } catch (error) {
     console.error("Error in checkIfPatient:", error);
-    return false;  // On error, assume the user is not a patient
+    return false; // On error, assume the user is not a patient
   }
 }
-
 
 /**
  * Retrieves a list of FCM tokens associated with a user's email.
@@ -159,22 +175,24 @@ async function getAccountToken(email) {
     const document = await getFirestore().collection("user").doc(email).get();
     if (!document.exists) {
       console.log("No document found for email:", email);
-      return null;  // No document found for the provided email
+      return null; // No document found for the provided email
     }
 
     const tokens = document.data().tokens;
     if (!tokens || !Array.isArray(tokens) || tokens.length === 0) {
-      console.log("Tokens are not available or not in the expected format for email:", email);
-      return null;  // Tokens field is missing or not an array
+      console.log(
+        "Tokens are not available or not in the expected format for email:",
+        email
+      );
+      return null; // Tokens field is missing or not an array
     }
 
-    return tokens;  // Returns the array of tokens
+    return tokens; // Returns the array of tokens
   } catch (error) {
     console.error("Error in getAccountToken:", error);
-    return null;  // Error case, return null
+    return null; // Error case, return null
   }
 }
-
 
 /**
  * Send notification to all tokens.
@@ -189,8 +207,8 @@ async function sendObserverRequest(tokens, body) {
     tokens: tokens,
     notification: {
       title: "Yêu cầu theo dõi",
-      body: `Từ: ${body.supervisorEmail}\nThời gian: ${body.time}`
-    }
+      body: `Từ: ${body.supervisorEmail}\nThời gian: ${body.time}`,
+    },
   };
 
   try {
@@ -199,7 +217,9 @@ async function sendObserverRequest(tokens, body) {
       if (resp.success) {
         console.log(`Successfully sent message to token: ${tokens[idx]}`);
       } else {
-        console.error(`Failed to send message to token: ${tokens[idx]} - ${resp.error}`);
+        console.error(
+          `Failed to send message to token: ${tokens[idx]} - ${resp.error}`
+        );
       }
     });
   } catch (error) {
