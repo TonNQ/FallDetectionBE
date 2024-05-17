@@ -31,22 +31,49 @@ exports.handleFallDetection = onRequest(async (req, res) => {
  */
 async function sendFall(body) {
   try {
-    const token = body.token
-    const message = {
+    const patient = await getFirestore().collection("user").where("deviceID", "==", body.data.deviceID).get()
+    const patientEmail = patient.docs[0].data().email
+    const patientName = patient.docs[0].data().fullName
+    
+    const userDeviceSnapshot = await admin.firestore().collection("user_device_collection").get();
+    const userList = [];
+    userDeviceSnapshot.forEach(doc => {
+        const userData = doc.data();
+        if (userData.patientEmail === patientEmail) {
+            userList.push(userData.userEmail);
+        }
+    });
+
+    const userTokens = [];
+    
+    for (const userEmail of userList) {
+        const userSnapshot = await admin.firestore().collection("userCollection").where("userEmail", "==", userEmail).get();
+        
+        userSnapshot.forEach(doc => {
+            const userData = doc.data();
+            const tokens = userData.token || [];
+            tokens.forEach(token => {
+                if (token) {
+                    userTokens.push(token);
+                }
+            });
+        });
+    }
+    
+    userTokens.forEach(async token => {
+      const message = {
       token: token,
       data: {
-        title: body.data.title,
-        patientEmail: body.data.patientEmail,
-        patientName: body.data.patientName,
-        address: body.data.address,
-        time: body.data.time,
+        patientEmail: patientEmail,
+        patientName: patientName,
       }
     }
-    await admin.messaging()
-      .send(message)
-      .then((response) => {
-        console.log("success", response)
-      })
+      await admin.messaging()
+        .send(message)
+        .then((response) => {
+          console.log("success", response)
+        })
+      });
   } catch (error) {
     console.error("Error in sendFall:", error)
   }
